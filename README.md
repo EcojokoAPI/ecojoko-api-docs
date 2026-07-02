@@ -59,6 +59,3 @@ Once you push this repo to GitHub:
 | `openapi.yaml` | The OpenAPI 3.1 spec — the single source of truth. |
 | `index.html` | Scalar renderer that loads `openapi.yaml`. |
 | `.github/workflows/deploy.yml` | GitHub Pages deployment. |
-
-The original request/response capture files (`*.txt`) are the raw material the spec was
-built from and are not required to serve the site.
