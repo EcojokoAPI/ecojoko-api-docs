@@ -10,16 +10,16 @@ permissions:
   pages: write
   id-token: write
 
-# Allow one concurrent deployment, cancel in-progress runs of the same group.
+# Allow one concurrent deployment. Do NOT cancel an in-progress run: cancelling
+# after the artifact upload leaves an orphaned "github-pages" artifact, which makes
+# actions/deploy-pages fail with "Multiple artifacts named github-pages ... count is 2".
 concurrency:
-  group: pages
-  cancel-in-progress: true
+  group: "pages"
+  cancel-in-progress: false
 
 jobs:
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+  # Build the artifact in its own job so exactly one upload happens per run.
+  build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -34,6 +34,14 @@ jobs:
           # Publish the repo root: index.html loads openapi.yaml alongside it.
           path: .
 
+  # Deploy the single artifact produced by the build job.
+  deploy:
+    needs: build
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
