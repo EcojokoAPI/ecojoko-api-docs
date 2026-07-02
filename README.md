@@ -1,8 +1,16 @@
 # Ecojoko API — Unofficial Documentation
 
 A community-made reference for the private HTTP API used by the **Ecojoko** mobile app
-(`https://service.ecojoko.com`). It is written as a single [OpenAPI 3.1](./openapi.yaml)
+(`https://service.ecojoko.com`). It is written as an [OpenAPI 3.1](./openapi.yaml)
 spec and rendered as a website with [Scalar](https://github.com/scalar/scalar).
+
+**Available in two languages** (toggle in the top-right of the page):
+
+- 🇫🇷 **French (default)** — [`index.html`](./index.html) → [`openapi.fr.yaml`](./openapi.fr.yaml)
+- 🇬🇧 **English** — [`en.html`](./en.html) → [`openapi.yaml`](./openapi.yaml)
+
+Both specs are kept structurally identical (same paths, parameters, and example payloads);
+only the human-written prose differs. Update both when changing endpoints.
 
 ## ⚠️ Disclaimer
 
@@ -56,6 +64,8 @@ Once you push this repo to GitHub:
 
 | File | Purpose |
 |------|---------|
-| `openapi.yaml` | The OpenAPI 3.1 spec — the single source of truth. |
-| `index.html` | Scalar renderer that loads `openapi.yaml`. |
+| `openapi.yaml` | The English OpenAPI 3.1 spec. |
+| `openapi.fr.yaml` | The French OpenAPI 3.1 spec (prose translated; same structure/examples). |
+| `index.html` | Scalar renderer for the French spec (default landing page). |
+| `en.html` | Scalar renderer for the English spec. |
 | `.github/workflows/deploy.yml` | GitHub Pages deployment. |

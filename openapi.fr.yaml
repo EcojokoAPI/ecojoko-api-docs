@@ -1,0 +1,1318 @@
+openapi: 3.1.0
+
+info:
+  title: API Ecojoko (non officielle)
+  version: "1.0.19"
+  summary: API HTTP de l'application mobile Ecojoko, documentée par la communauté.
+  description: |
+    Documentation non officielle, obtenue par rétro-ingénierie, de l'API HTTP privée que
+    l'application mobile **Ecojoko** (`Ecojoko/1.0.19`) utilise pour dialoguer avec
+    `https://service.ecojoko.com`.
+
+    Elle permet de lire vos données de suivi énergétique : puissance en temps réel, séries
+    temporelles de puissance / température / humidité, répartition de consommation par usage
+    (IA), économies, missions, trophées, classement, messages et préférences de notification.
+
+    ## ⚠️ Avertissement
+
+    - Ceci est un projet **non officiel, réalisé par la communauté**. L'auteur n'est **en
+      aucune façon affilié à, approuvé par, ou lié à Ecojoko / homesys**.
+    - Il a été produit en observant le trafic de l'application officielle. L'API réelle peut
+      **changer à tout moment sans préavis**, et cette documentation peut devenir inexacte
+      ou cesser de fonctionner. **À utiliser à vos propres risques.**
+    - Toutes les valeurs d'exemple de ce document sont **anonymisées** (identifiants, jetons,
+      e-mails, adresses MAC, numéros de série de compteur, etc. fictifs).
+
+    ## Authentification — à lire en premier
+
+    Presque tous les points d'accès nécessitent une **session authentifiée**.
+    L'authentification repose sur des **cookies** :
+
+    1. Appelez `POST /login` avec l'e-mail de votre compte (`l`) et votre mot de passe (`p`).
+       C'est le **seul** point d'accès qui ne requiert pas de session existante.
+    2. La réponse dépose deux cookies via `Set-Cookie` :
+       - **`LKSA`** — le jeton de session, envoyé comme **cookie de session**
+         (sans `Expires`/`Max-Age` dans la réponse observée).
+       - **`tdw`** — un jeton compagnon, envoyé avec un `Max-Age` de `2592000` secondes
+         (≈30 jours) dans la réponse observée. C'est la durée de vie annoncée du cookie ;
+         le serveur peut néanmoins invalider la session plus tôt.
+    3. Renvoyez **les deux** cookies à chaque requête suivante via l'en-tête `Cookie`.
+       Dès que la session n'est plus acceptée (ou après déconnexion), reconnectez-vous.
+
+    Dans ce document, le schéma de sécurité modélise le cookie `LKSA` ; gardez à l'esprit que
+    la session réelle repose aussi sur le cookie `tdw` renvoyé en même temps.
+
+    ## Codes de période
+
+    Les points d'accès de type série temporelle prennent un code de granularité `{period}`
+    dans le chemin. Codes observés dans le trafic capturé :
+
+    | Code | Signification |
+    |------|---------------|
+    | `h`  | Fenêtre horaire (haute résolution) |
+    | `d4` | Jour |
+    | `w`  | Semaine |
+    | `m`  | Mois |
+    | `m6` | Mois (la vue « mois » ; utilisée par `powerstat`) |
+    | `y`  | Année |
+
+    **Tous les points d'accès n'acceptent pas tous les codes.** Les codes documentés par
+    point d'accès sont : `powerstat` → `h, d4, w, m6, y` ; `savingstat` → `w, m, y` ;
+    `tempstat` → `h, d4, w, m, y` ; `humstat` → `h, d4, w, m, y` ; `ia/conso` → `w, m` ;
+    `savings` → `m`. Ils proviennent du trafic capturé ; d'autres combinaisons peuvent
+    fonctionner ou non.
+
+  contact:
+    name: Ecojoko (site officiel)
+    url: https://www.ecojoko.com
+  license:
+    name: CC BY-NC 4.0
+    url: https://creativecommons.org/licenses/by-nc/4.0/
+
+servers:
+  - url: https://service.ecojoko.com
+    description: Service de production
+
+tags:
+  - name: Auth
+    description: Création de session. Le seul point d'accès non authentifié.
+  - name: User
+    description: Informations au niveau du compte et résumé d'activité inter-passerelles.
+  - name: Gateways
+    description: Passerelles (l'assistant Ecojoko) et leurs appareils associés.
+  - name: Devices – Power
+    description: Données du compteur électrique (Linky / ERL) — temps réel, statistiques et tendances.
+  - name: Devices – Temp/Humidity
+    description: Séries temporelles de la sonde de température et d'humidité.
+  - name: Insights (IA)
+    description: Répartition de consommation par usage (IA) et détection des cycles d'appareils.
+  - name: Savings & Housing
+    description: Estimations d'économies, installation, profil du logement et relevés de facturation.
+  - name: Gamification
+    description: Missions, trophées/récompenses et classement de voisinage.
+  - name: Messages & Notifications
+    description: Fil des messages in-app et préférences du centre de notifications.
+
+# Chaque opération requiert le cookie de session, sauf /login qui surcharge ce comportement.
+security:
+  - sessionCookie: []
+
+paths:
+  /login:
+    post:
+      tags: [Auth]
+      summary: Se connecter et créer une session
+      operationId: login
+      description: |
+        Authentifie avec e-mail + mot de passe et démarre une session.
+
+        En cas de succès, le serveur renvoie deux en-têtes `Set-Cookie` — **`LKSA`** (jeton
+        de session) et **`tdw`** — à renvoyer sur toutes les requêtes suivantes.
+
+        > Remarque : bien que la requête soit envoyée avec
+        > `Content-Type: application/x-www-form-urlencoded`, l'application transmet un petit
+        > objet JSON comme corps. Les deux formes sont montrées ci-dessous.
+      security: []          # point d'accès public
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [l, p]
+              properties:
+                l:
+                  type: string
+                  description: Identifiant du compte (adresse e-mail).
+                p:
+                  type: string
+                  description: Mot de passe du compte.
+            example:
+              l: user@example.com
+              p: your-password
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [l, p]
+              properties:
+                l: { type: string }
+                p: { type: string }
+      responses:
+        "200":
+          description: |
+            Résultat de la connexion. `error_id` vaut `0` en cas de succès. Les cookies de
+            session sont fournis dans les en-têtes de réponse `Set-Cookie`.
+          headers:
+            Set-Cookie:
+              description: |
+                Dépose le cookie de session `LKSA` **et** (dans un second en-tête
+                `Set-Cookie`) le cookie `tdw`. Renvoyez les deux sur les requêtes suivantes.
+              schema:
+                type: string
+              example: "LKSA=SESSION_TOKEN_PLACEHOLDER; path=/; domain=ecojoko.com; secure"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  preferred_lang: { type: string }
+                  user_level: { type: string }
+                  x_login:
+                    type: string
+                    description: Identifiant de messagerie interne (backend temps réel de type XMPP).
+                  x_server:
+                    type: string
+                    description: Hôte/port du backend temps réel.
+                  error_id: { type: integer }
+                  error_desc: { type: string }
+              example:
+                preferred_lang: ""
+                user_level: "0"
+                x_login: "0000000000@homesys"
+                x_server: "service.ecojoko.com:5223"
+                error_id: 0
+                error_desc: "Vous êtes connecté."
+        "401":
+          description: Identifiants invalides. `error_id` est non nul.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+              example: { error_id: 1, error_desc: "Identifiants incorrects." }
+
+  /user:
+    get:
+      tags: [User]
+      summary: Obtenir le compte utilisateur courant
+      operationId: getUser
+      description: Profil du compte, état de l'abonnement et type de passerelle attendu.
+      responses:
+        "200":
+          description: Le compte de l'utilisateur authentifié.
+          content:
+            application/json:
+              example:
+                login: user@example.com
+                insert_time: "2020-01-01 00:00:00"
+                house_name: My Home
+                color: "#5ed7c0"
+                operator: example_operator
+                subscription:
+                  is_active: 1
+                  is_free: 0
+                  step: 1
+                  is_insider: 0
+                is_ref_insider: true
+                expected_gateway_type: MURPHY2
+                is_erl_insider: true
+                is_erl: true
+                co2_emis: 50.0
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /user/activity:
+    get:
+      tags: [User]
+      summary: Obtenir le résumé d'activité inter-passerelles
+      operationId: getUserActivity
+      description: |
+        Résumé du tableau de bord : économies et consommation sur 7 jours, consommation
+        totale, position au classement, émissions de CO₂, signal Ecowatt et records de
+        puissance de pointe.
+      responses:
+        "200":
+          description: Résumé d'activité.
+          content:
+            application/json:
+              example:
+                activity:
+                  savings_7j: { value: -10, degree: 200.0, ref_kwh: 50.0 }
+                  conso_7j:
+                    value: 10.00
+                    kwh: 50.0
+                    kwh_with_ref: 50.0
+                    unit: EUR
+                    unit_str: "€"
+                    conso_unit_str: kWh
+                    data: [300, 300, 300, 300, 300, 300, 300]
+                  conso_all: { value: 30.00, unit: EUR, unit_str: "€" }
+                  classement: 1
+                  co2_emis: 50.0
+                  week_reference: 1
+                  max_power:
+                    month: 5000
+                    year: 8000
+                    alltime: 8000
+                    injection_month: 0
+                    injection_year: 0
+                    injection_alltime: 0
+                    unit_str: W
+                  ecowatt_signal: "#c4fbdb"
+                  ecowatt_signal_val: 0
+                  max_injection: 4000
+                  max_consumption: 8000
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /gateways:
+    get:
+      tags: [Gateways]
+      summary: Lister les passerelles et leurs appareils
+      operationId: listGateways
+      description: |
+        Renvoie toutes les passerelles du compte avec leur état réseau, leurs réglages et la
+        liste des appareils associés (compteurs de puissance, sondes température/humidité, …).
+        Chaque appareil annonce les `device_commands` qu'il prend en charge — elles
+        correspondent aux points d'accès de statistiques documentés sous les chemins des
+        appareils.
+      responses:
+        "200":
+          description: Passerelles avec leurs appareils imbriqués.
+          content:
+            application/json:
+              example:
+                gateways:
+                  - gateway_id: 12345
+                    gateway_type: MURPHY2
+                    network:
+                      ethernet: { state: 0, mac: "XX:XX:XX:XX:XX:73" }
+                      wifi:
+                        state: 1
+                        ssid: MyWiFi
+                        signal: 50
+                        channel: 1
+                        mac: "XX:XX:XX:XX:XX:70"
+                    ap_ssid: "Monky2 XXXX"
+                    ap_ble: "XX:XX:XX:XX:XX:72"
+                    gateway_firmware_version: "1.01.02"
+                    gateway_firmware_upgrade_needed: 0
+                    gateway_settings:
+                      gateway_name: Mon assistant
+                      ap_ssid: ECOJOKO_XXXX
+                      timezone: Europe/Paris
+                      timezone_offset: 7200
+                      night_mode:
+                        is_enabled: 1
+                        schedule: { is_enabled: 1, start: "00:00", stop: "23:59" }
+                    tic_output_enabled: 1
+                    devices:
+                      - device_id: 67890
+                        device_status: 1
+                        device_status_desc: Connecté
+                        connection_status: 1
+                        device_type: TEMP_HUM
+                        device_state:
+                          temperature: 200
+                          temperature_unit: C
+                          humidity: 50
+                        device_commands:
+                          [tempstat, humstat, extract, temp_offset, hum_offset,
+                           reset_temp_offset, reset_hum_offset]
+                        battery: { level: 255, value: "", type: AC Power }
+                        signal: { level: -1, value: "", type: NONE }
+                        device_model: "4804"
+                        device_settings:
+                          name: Sonde de température
+                          temp_offset: 0
+                          hum_offset: 0
+                          loc_cp: "00000"
+                          loc_city: Anytown
+                          image_link: https://service.ecojoko.com/img/placeholder.webp
+                        binding_time: 1550000000000
+                      - device_id: 67891
+                        device_status: 1
+                        device_status_desc: Connecté
+                        connection_status: 1
+                        device_type: POWER_METER
+                        device_state:
+                          power_level: 200
+                          last_level: 300
+                          cumulated_power: 200
+                          install_state: 5
+                          meter_serial: "0000000000000"
+                          tic_mode: 0
+                          triphase: -1
+                          subscribed_power: 9
+                          offer_type: HP/HC
+                          producer_mode: 0
+                        device_commands:
+                          [resetcumulatedpower, powerstat, poweruistat, powervstat,
+                           realtime_conso, batstat, savingstat, extract, powertrend,
+                           rankstat, category_rankstat, kwhstat, ap2ac_coeffstat,
+                           power_kwhstat, refresh_status, autoconso_stat,
+                           injection_duration]
+                        battery: { level: 255, value: "", type: AC Power }
+                        signal: { level: 7, value: "70%", type: UNET }
+                        device_model: ERL1
+                        device_settings:
+                          name: Clé Linky
+                          image_link: https://service.ecojoko.com/img/placeholder.webp
+                        binding_time: 1550000000000
+                        device_fw_ver: 2V2_00
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /gateway/{gatewayId}/installation:
+    get:
+      tags: [Savings & Housing]
+      summary: Obtenir les détails d'installation et de fournisseur d'énergie
+      operationId: getInstallation
+      parameters: [{ $ref: "#/components/parameters/GatewayId" }]
+      responses:
+        "200":
+          description: Configuration de l'installation électrique et du tarif/fournisseur.
+          content:
+            application/json:
+              example:
+                is_three_phased: 0
+                supplier:
+                  id: 100000
+                  supplier_id: 100
+                  supplier_name: Example Energy
+                  offer_id: 200
+                  power_id: 300
+                  special_day: 1
+                  offer_name: Example offer - HP/HC
+                  offer_type: HP/HC
+                  power: 9
+                  power_val: 9 kVA
+                  is_hchp: 1
+                  fixed_hphc: 0
+                  fixed_price_duration: "0"
+                  start_date: 1550000000000
+                  off_peak_timeslot:
+                    timeslot_id: 1
+                    timeslots: [{ start: "22:00", stop: "06:00" }]
+                  timeslot_id: 1
+                  is_active: 1
+                  public_prices: "0"
+                  subscription_type: 0
+                  subscription_price: 20.00
+                need_producer_settings: 0
+                tic_output_enabled: 1
+                need_profile: 0
+                need_pdl: 0
+                is_temporary_reference: 0
+                need_cp_for_temp: 0
+                consumption_indexes:
+                  - { id: 3, label: HEURES CREUSES, display_order: 0, value: 0 }
+                  - { id: 2, label: HEURES PLEINES, display_order: 1, value: 0 }
+                optional_consumption_indexes:
+                  - { id: 1, label: BASE, value: 0 }
+                is_off_peak_meter: 1
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /gateway/{gatewayId}/housing_profile:
+    get:
+      tags: [Savings & Housing]
+      summary: Obtenir le profil du logement
+      operationId: getHousingProfile
+      description: Caractéristiques du foyer (surface, occupants, chauffage et appareils) utilisées pour les estimations d'économies.
+      parameters: [{ $ref: "#/components/parameters/GatewayId" }]
+      responses:
+        "200":
+          description: Profil du logement.
+          content:
+            application/json:
+              example:
+                nb_people: 3
+                house_type: 2
+                house_surface: 100
+                is_primary_house: 1
+                energy_category: 3
+                energy_profile:
+                  heating_type: 2
+                  primary_heating: 2
+                  heating:
+                    electric_heater: 3
+                    heat_pump: 1
+                    air_conditioner: 1
+                    other_heater: 0
+                    other_heating: 0
+                    wood: 0
+                    gaz: 1
+                    fioul: 0
+                    electric_radiator: 2
+                    air_air_heat_pump: 1
+                    air_water_heat_pump: 0
+                    electric_floor_heating: 1
+                  boiler_type: 2
+                  energy_device:
+                    pool: 1
+                    electric_car: 1
+                    jacuzzi: 0
+                    dishwasher: 0
+                    tumbledryer: 0
+                    washerdryer: 0
+                    combo_washer_dryer: 1
+                    other: 0
+                    fridge: 1
+                    cooking_hob_type: 1
+                    electric_car_charger_type: 1
+                    water_heater_resistance: 0
+                    water_heater_thermodynamic: 1
+                    water_heater_instant: 0
+                    water_heater_heat_pump: 0
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /gateway/{gatewayId}/statements:
+    get:
+      tags: [Savings & Housing]
+      summary: Lister les relevés de facturation
+      operationId: getStatements
+      parameters: [{ $ref: "#/components/parameters/GatewayId" }]
+      responses:
+        "200":
+          description: Relevés de facturation (peut être vide).
+          content:
+            application/json:
+              example:
+                statements: []
+                is_three_phased: 0
+                is_terminated: 1
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /gateway/{gatewayId}/savings/{period}/{count}:
+    get:
+      tags: [Savings & Housing]
+      summary: Obtenir l'estimation d'économies
+      operationId: getSavings
+      description: |
+        Économies estimées par rapport au profil initial et à la référence « best », sur les
+        `{count}` dernières unités de `{period}` (p. ex. `m/12` = 12 derniers mois).
+      parameters:
+        - { $ref: "#/components/parameters/GatewayId" }
+        - name: period
+          in: path
+          required: true
+          description: |
+            Granularité d'agrégation. Valeur observée pour **savings** : `m` (mois).
+            Voir la référence des périodes pour la signification.
+          schema:
+            type: string
+            enum: [m]
+          example: m
+        - name: count
+          in: path
+          required: true
+          description: Nombre de périodes à agréger (p. ex. `12`).
+          schema: { type: integer }
+          example: 12
+      responses:
+        "200":
+          description: Détail des économies.
+          content:
+            application/json:
+              example:
+                savings:
+                  conso: 1200.00
+                  profil_initial: 1250.00
+                  best: 1240.00
+                  home: 1100
+                  unit: EUR
+                  measurements_str: Chauffage, Eau chaude
+                  measurements: [1, 1]
+                  kwh: 6000.00
+                  need_house_info: 0
+                  access: { conso: 1, savings: 1 }
+                  week_reference: 1
+                  profil_initial_kwh: 6200.00
+                  kwh_with_ref: 6100.00
+                  savings:
+                    me: { level: 5, data: 40.00 }
+                    best: { level: 1, data: -40.00 }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /gateway/{gatewayId}/device/{deviceId}/realtime_conso:
+    get:
+      tags: [Devices – Power]
+      summary: Obtenir la consommation en temps réel
+      operationId: getRealtimeConso
+      description: Puissance active instantanée (W), puissance apparente (VA) et angle du facteur de puissance.
+      parameters:
+        - { $ref: "#/components/parameters/GatewayId" }
+        - { $ref: "#/components/parameters/DeviceId" }
+      responses:
+        "200":
+          description: Relevé en temps réel.
+          content:
+            application/json:
+              example:
+                real_time:
+                  watt: "200 W"
+                  value: 200
+                  va: "300 VA"
+                  value2: 300
+                  degree: -30.0
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /gateway/{gatewayId}/device/{deviceId}/powertrend:
+    get:
+      tags: [Devices – Power]
+      summary: Obtenir la tendance de puissance à court terme
+      operationId: getPowerTrend
+      description: |
+        Une courte fenêtre glissante d'échantillons de puissance haute résolution (`value` en
+        watts, `price` en devise) avec les totaux agrégés dans `period`. Le tableau
+        d'échantillons est tronqué dans l'exemple ci-dessous.
+      parameters:
+        - { $ref: "#/components/parameters/GatewayId" }
+        - { $ref: "#/components/parameters/DeviceId" }
+      responses:
+        "200":
+          description: Fenêtre de tendance de puissance.
+          content:
+            application/json:
+              example:
+                stat:
+                  data:
+                    - { time: 1632990911000, value: 250, price: 1.9e-5 }
+                    - { time: 1632990916000, value: 250, price: 7.6e-6 }
+                    - { time: 1632990918000, value: 250, price: 1.9e-5 }
+                  period:
+                    this: 1632990911000
+                    prev: 1632990811000
+                    next: 1632991011000
+                    measure_unit: W
+                    kwh_hp_ns: 0.003
+                    kwh_hc_ns: 0
+                    price: 0.0002
+                    price_prod: 0
+                    kwh: 0.003
+                    kwh_prod: 0
+                    raw_watt: 250
+                  axis: { y: { max: 300 } }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /gateway/{gatewayId}/device/{deviceId}/powerstat/{period}/{date}:
+    get:
+      tags: [Devices – Power]
+      summary: Obtenir la série temporelle de statistiques de puissance
+      operationId: getPowerStat
+      description: |
+        Série temporelle de consommation de puissance pour la `{period}` donnée à partir de
+        `{date}`.
+
+        **La forme de `stat.data[]` dépend de la période :**
+
+        - **Périodes intra-journalières (p. ex. `d4`)** : un point par horodatage, chacun
+          avec la `value` de puissance mesurée (W), la ligne de base de veille (`consobase`),
+          le coût (`price`) et — pour les tarifs HP/HC — le palier `pricing` applicable.
+        - **Périodes agrégées (p. ex. `w`)** : un point par sous-intervalle (par jour de la
+          semaine pour `w`), chacun avec un total d'énergie `kwh`, un `kwh_prod` optionnel
+          (surplus de production, en cas de production) et une ventilation `subconsumption[]`
+          par plage tarifaire (`Heures Creuses`/`Heures Pleines`, ou les plages Tempo
+          `HC Bleu`, `HP Bleu`, `HC Blanc`, `HP Blanc`, `HC Rouge`, `HP Rouge`).
+
+        L'objet `period` en fin contient les totaux agrégés et `pricing_details` associe les
+        identifiants de tarification à des libellés. Les tableaux de données sont tronqués
+        dans les exemples ci-dessous.
+      parameters:
+        - { $ref: "#/components/parameters/GatewayId" }
+        - { $ref: "#/components/parameters/DeviceId" }
+        - name: period
+          in: path
+          required: true
+          description: |
+            Granularité. Valeurs observées pour **powerstat** : `h` (heure), `d4` (jour),
+            `w` (semaine), `m6` (mois), `y` (année). Voir la référence des périodes.
+          schema:
+            type: string
+            enum: [h, d4, w, m6, y]
+          example: d4
+        - { $ref: "#/components/parameters/StatDate" }
+      responses:
+        "200":
+          description: Statistiques de puissance.
+          content:
+            application/json:
+              examples:
+                dayResolution:
+                  summary: Intra-journalier (d4) — watts par horodatage
+                  description: Réponse `powerstat/d4` capturée (tableau de données tronqué).
+                  value:
+                    stat:
+                      data:
+                        - { time: 1632943200000, consobase: 60, value: 2000, price: 0.0025, cp: 0.0005, is_hchp: 1, pricing: 3 }
+                        - { time: 1632943440000, consobase: 60, value: 2000, price: 0.0025, cp: 0.0005, is_hchp: 1, pricing: 3 }
+                        - { time: 1632991020000, consobase: 60, value: 400, price: 0.0009, cp: 0.00003, pricing: 2 }
+                      period:
+                        this: 1632943200000
+                        prev: 1632856800000
+                        measure_unit: W
+                        veille_price: 0.10
+                        veille_watt: 60
+                        kwh_hp_ns: 1.5
+                        kwh_hc_ns: 4.5
+                        missing_data: 0
+                        price: 1.20
+                        price_prod: 0
+                        kwh: 6.0
+                        kwh_prod: 0
+                        raw_watt: 500
+                      pricing_details:
+                        - { color: "#7ED2DF", id: 2, label: Heures Pleines }
+                        - { color: "#679AA2", id: 3, label: Heures Creuses }
+                      axis: { y: { max: 7000 } }
+                weekWithSubconsumption:
+                  summary: Hebdomadaire (w) — kWh par jour avec ventilation tarifaire (déduit)
+                  description: |
+                    **Déduit, non capturé.** Illustre la forme des périodes agrégées (une
+                    entrée par jour de la semaine) telle qu'exploitée par l'intégration Home
+                    Assistant communautaire `little_monkey`. Les champs montrés (`kwh`,
+                    `kwh_prod` et `subconsumption[].label`/`.kwh`) sont ceux que cette
+                    intégration lit ; d'autres champs et valeurs peuvent différer. La première
+                    ligne correspond à un compteur HC/HP, la seconde à un compteur Tempo.
+                  value:
+                    stat:
+                      data:
+                        - time: 1632388800000
+                          kwh: 12.0
+                          kwh_prod: 0
+                          subconsumption:
+                            - { label: Heures Creuses, kwh: 7.0 }
+                            - { label: Heures Pleines, kwh: 5.0 }
+                        - time: 1632475200000
+                          kwh: 10.0
+                          kwh_prod: 1.0
+                          subconsumption:
+                            - { label: HC Bleu, kwh: 4.0 }
+                            - { label: HP Bleu, kwh: 3.0 }
+                            - { label: HC Blanc, kwh: 2.0 }
+                            - { label: HP Blanc, kwh: 1.0 }
+                            - { label: HC Rouge, kwh: 0 }
+                            - { label: HP Rouge, kwh: 0 }
+                      period:
+                        this: 1632388800000
+                        prev: 1631784000000
+                        measure_unit: W
+                        kwh: 60.0
+                        kwh_prod: 2.0
+                      axis: { y: { max: 7000 } }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /gateway/{gatewayId}/device/{deviceId}/savingstat/{period}/{date}:
+    get:
+      tags: [Devices – Power]
+      summary: Obtenir la série temporelle de statistiques d'économies
+      operationId: getSavingStat
+      description: |
+        Série temporelle d'économies par période comparant la consommation réelle (`conso`) à
+        la référence (`ref`), avec l'économie résultante (`val`) en devise et en kWh.
+        `is_saving` indique si l'intervalle a réalisé une économie par rapport à la référence.
+        L'objet `period` en fin contient les totaux agrégés. Tableau de données tronqué
+        ci-dessous.
+
+        À distinguer de `GET /gateway/{gatewayId}/savings/{period}/{count}`, qui renvoie un
+        *résumé* d'économies agrégé plutôt qu'une série temporelle.
+      parameters:
+        - { $ref: "#/components/parameters/GatewayId" }
+        - { $ref: "#/components/parameters/DeviceId" }
+        - name: period
+          in: path
+          required: true
+          description: |
+            Granularité pour **savingstat** : `w` (semaine), `m` (mois), `y` (année).
+            Voir la référence des périodes.
+          schema:
+            type: string
+            enum: [w, m, y]
+          example: w
+        - { $ref: "#/components/parameters/StatDate" }
+      responses:
+        "200":
+          description: Statistiques d'économies.
+          content:
+            application/json:
+              example:
+                stat:
+                  period:
+                    this: 1632684000000
+                    prev: 1632079200000
+                    measure_unit: EUR
+                    veille_price: 1.00
+                    veille_kwh: 4
+                    missing_data: 0
+                    ref: 7.00
+                    ref_kwh: 30.0
+                    val: 0.70
+                    val_kwh: 2.5
+                    is_saving: 1
+                    price: 6.30
+                    kwh: 27.5
+                  data:
+                    - { time: 1632684000000, conso: 2.00, val: 0.20, ref: 2.20, conso_kwh: 10.0, ref_kwh: 10.0, val_kwh: 0.10, is_saving: 1 }
+                    - { time: 1632856800000, conso: 2.00, val: 0.30, ref: 2.30, conso_kwh: 8.0, ref_kwh: 10.0, val_kwh: 2.0, is_saving: 1 }
+                    - { time: 1632943200000, conso: 0, val: 0, val_kwh: 0, ref: 0, conso_kwh: 0, ref_kwh: 0 }
+                  pricing_details:
+                    - { id: 2, label: Heures Pleines, color: "#0087B1", enable_filter: 1 }
+                    - { id: 3, label: Heures Creuses, color: "#6BBED8", enable_filter: 1 }
+                  axis: { y: { max: 5, min: -5 } }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /gateway/{gatewayId}/device/{deviceId}/tempstat/{period}/{date}:
+    get:
+      tags: [Devices – Temp/Humidity]
+      summary: Obtenir la série temporelle de statistiques de température
+      operationId: getTempStat
+      description: |
+        Série temporelle de température intérieure (`value`, °C) et extérieure (`ext_value`)
+        pour la `{period}` donnée à partir de `{date}`. Tableau de données tronqué ci-dessous.
+      parameters:
+        - { $ref: "#/components/parameters/GatewayId" }
+        - { $ref: "#/components/parameters/DeviceId" }
+        - name: period
+          in: path
+          required: true
+          description: |
+            Granularité pour **tempstat** : `h` (heure), `d4` (jour), `w` (semaine),
+            `m` (mois), `y` (année). Voir la référence des périodes.
+          schema:
+            type: string
+            enum: [h, d4, w, m, y]
+          example: d4
+        - { $ref: "#/components/parameters/StatDate" }
+      responses:
+        "200":
+          description: Statistiques de température.
+          content:
+            application/json:
+              example:
+                stat:
+                  data:
+                    - { time: 1632943200000, value: 20.0, ext_value: 15.0 }
+                    - { time: 1632943320000, value: 20.0, ext_value: 15.0 }
+                    - { time: 1632991020000, value: 20.0, ext_value: 15.0 }
+                  period:
+                    this: 1632943200000
+                    prev: 1632856800000
+                    measure_unit: "°C"
+                    kwh_hp_ns: 0
+                    kwh_hc_ns: 0
+                  axis: { y: { max: 27, min: 10 } }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /gateway/{gatewayId}/device/{deviceId}/humstat/{period}/{date}:
+    get:
+      tags: [Devices – Temp/Humidity]
+      summary: Obtenir la série temporelle de statistiques d'humidité
+      operationId: getHumStat
+      description: |
+        Série temporelle d'humidité relative intérieure (`value`, %) et extérieure
+        (`ext_value`) pour la `{period}` donnée à partir de `{date}`. Tableau de données
+        tronqué ci-dessous.
+      parameters:
+        - { $ref: "#/components/parameters/GatewayId" }
+        - { $ref: "#/components/parameters/DeviceId" }
+        - name: period
+          in: path
+          required: true
+          description: |
+            Granularité pour **humstat** : `h` (heure), `d4` (jour), `w` (semaine),
+            `m` (mois), `y` (année). Voir la référence des périodes.
+          schema:
+            type: string
+            enum: [h, d4, w, m, y]
+          example: d4
+        - { $ref: "#/components/parameters/StatDate" }
+      responses:
+        "200":
+          description: Statistiques d'humidité.
+          content:
+            application/json:
+              example:
+                stat:
+                  data:
+                    - { time: 1632943200000, value: 50, ext_value: 60.0 }
+                    - { time: 1632943320000, value: 50, ext_value: 60.0 }
+                    - { time: 1632944400000, value: 50, ext_value: 60.0 }
+                  period:
+                    this: 1632943200000
+                    prev: 1632856800000
+                    measure_unit: "%"
+                    kwh_hp_ns: 0
+                    kwh_hc_ns: 0
+                  axis: { y: { max: 100, min: 0 } }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /gateway/{gatewayId}/device/{deviceId}/ia/conso/{period}/{date}:
+    get:
+      tags: [Insights (IA)]
+      summary: Obtenir la répartition de consommation par usage (IA)
+      operationId: getIaConso
+      description: |
+        Consommation estimée par l'IA, répartie par catégorie d'usage (eau chaude, gros
+        électroménager, veilles, réfrigérateurs, cuisson, …) pour une période. Certaines
+        catégories contiennent des `usage_childrens` imbriqués. `evol_status` encode la
+        tendance par rapport à la période précédente.
+
+        Le `/{date}` final est optionnel : omettez-le (p. ex. `.../ia/conso/w`) pour obtenir
+        la période la plus récente.
+      parameters:
+        - { $ref: "#/components/parameters/GatewayId" }
+        - { $ref: "#/components/parameters/DeviceId" }
+        - name: period
+          in: path
+          required: true
+          description: |
+            Granularité. Valeurs observées pour **ia/conso** : `w` (semaine), `m` (mois).
+            Voir la référence des périodes.
+          schema:
+            type: string
+            enum: [w, m]
+          example: w
+        - name: date
+          in: path
+          required: true
+          description: |
+            Date de début de période (`AAAA-MM-JJ`). Optionnelle en pratique — l'application
+            appelle aussi `.../ia/conso/{period}` sans date pour la période courante.
+          schema: { type: string }
+          example: "2026-06-15"
+      responses:
+        "200":
+          description: Répartition par usage.
+          content:
+            application/json:
+              example:
+                stat:
+                  period:
+                    this: 1632079200000
+                    prev: 1631474400000
+                    measure_unit: EUR
+                    price: 15.00
+                    kwh: 60.0
+                  data:
+                    - kwh: 24.0
+                      price: 6.00
+                      percentage: 40
+                      category: { id: 3, name: Eau chaude, color: "#ff712b" }
+                      evol_status: 1
+                    - kwh: 12.0
+                      price: 3.00
+                      percentage: 20
+                      category: { id: 5, name: Gros électroménager, color: "#05a1fb" }
+                      is_beta: true
+                      usage_childrens:
+                        - kwh: 3.0
+                          price: 0.75
+                          percentage: 5
+                          category: { id: 12, name: Lave-vaisselle, color: "#05a1fb", image_link: "https://service.ecojoko.com/img/placeholder.webp" }
+                        - kwh: 9.0
+                          price: 2.25
+                          percentage: 15
+                          category: { id: 13, name: Lavage du linge, color: "#05a1fb", image_link: "https://service.ecojoko.com/img/placeholder.webp" }
+                      evol_status: 1
+                    - kwh: 9.0
+                      price: 2.25
+                      percentage: 15
+                      category: { id: 6, name: "Frigos, Congélateurs", color: "#01d7fe" }
+                      evol_status: 2
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /gateway/{gatewayId}/device/{deviceId}/ia/appliances/{start}/{end}:
+    get:
+      tags: [Insights (IA)]
+      summary: Lister les cycles d'appareils détectés
+      operationId: getIaAppliances
+      description: |
+        Événements d'activation d'appareils individuels détectés par l'IA sur une fenêtre
+        temporelle. Chaque entrée possède un horodatage de début/fin, la puissance de pointe
+        `power` (W), l'énergie (`kwh`) et un `picto` utilisé pour l'affichage. Passez `0/0`
+        pour utiliser la fenêtre par défaut. Tableau tronqué ci-dessous.
+      parameters:
+        - { $ref: "#/components/parameters/GatewayId" }
+        - { $ref: "#/components/parameters/DeviceId" }
+        - name: start
+          in: path
+          required: true
+          description: Début de fenêtre (secondes epoch), ou `0` pour la fenêtre par défaut.
+          schema: { type: integer }
+          example: 0
+        - name: end
+          in: path
+          required: true
+          description: Fin de fenêtre (secondes epoch), ou `0` pour la fenêtre par défaut.
+          schema: { type: integer }
+          example: 0
+      responses:
+        "200":
+          description: Cycles d'appareils détectés.
+          content:
+            application/json:
+              example:
+                error_id: 0
+                appliances:
+                  - { id: 1550000000, start_date: 1550000000000, end_date: 1550000600000, power: 2000, kwh: 0.30, picto: { w: 14, h: 34, color: "#F7B500" } }
+                  - { id: 1550010000, start_date: 1550010000000, end_date: 1550017000000, power: 2000, kwh: 4.50, picto: { w: 96, h: 32, color: "#FA6200" } }
+                  - { id: 1550020000, start_date: 1550020000000, end_date: 1550020200000, power: 500, kwh: 0.02, picto: { w: 5, h: 8, color: "#5FC2FF" } }
+                is_pending: 0
+                start_time: 1549996400
+                stop_time: 1550100000
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /gateway/{gatewayId}/device_types:
+    get:
+      tags: [Gamification]
+      summary: Lister les types d'appareils
+      operationId: getDeviceTypes
+      description: Liste de référence des catégories d'appareils (id → libellé) utilisée dans toute l'application.
+      parameters: [{ $ref: "#/components/parameters/GatewayId" }]
+      responses:
+        "200":
+          description: Liste de référence des types d'appareils.
+          content:
+            application/json:
+              example:
+                device_types:
+                  - { type_id: 1, type_label: Réfrigérateur }
+                  - { type_id: 4, type_label: Lave-linge }
+                  - { type_id: 7, type_label: Lave-vaisselle }
+                  - { type_id: 19, type_label: Chauffe-eau }
+                  - { type_id: -1, type_label: Autre }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /gateway/{gatewayId}/achievements:
+    get:
+      tags: [Gamification]
+      summary: Obtenir les records et trophées
+      operationId: getAchievements
+      description: Les `records` de consommation de l'utilisateur et les `prizes` obtenus (trophées / niveaux).
+      parameters: [{ $ref: "#/components/parameters/GatewayId" }]
+      responses:
+        "200":
+          description: Records et récompenses.
+          content:
+            application/json:
+              example:
+                records:
+                  - { id: 1001, title: "", type: niv1, img: ecusson_niv1, msg: Niveau 1 banane de bronze, extra_info: "0" }
+                  - { id: 1002, title: Record 24h, type: record_24h, img: ecusson_record, msg: Plus faible consommation sur 24h, extra_info: "5,0", time: Le 1 janvier 2025 }
+                prizes:
+                  - id: 2
+                    type: PASSER_SEUIL_X_ECONOMIE
+                    level: 1
+                    stars: 5
+                    ecran: records
+                    notification:
+                      title: Vous économisez de l’argent
+                      type: TROPHEES
+                      desc: 10€ d’économie réalisée jusqu’à maintenant. Bravo!
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /gateway/{gatewayId}/missions:
+    get:
+      tags: [Gamification]
+      summary: Lister les catégories de missions
+      operationId: getMissions
+      description: |
+        Catégories de missions d'économie d'énergie avec l'avancement (`done`/`total`) et la
+        fourchette de gain estimée par catégorie.
+      parameters: [{ $ref: "#/components/parameters/GatewayId" }]
+      responses:
+        "200":
+          description: Catégories de missions.
+          content:
+            application/json:
+              example:
+                missions:
+                  - { nom: Veilles, color: "#9b5988", flutter_color: "#022469", done: 0, total: 6, category_id: 0, min_gain: 40, max_gain: 80, gain_unit: EUR }
+                  - { nom: Linge, color: "#05a1fb", flutter_color: "#67BCE0", done: 0, total: 6, category_id: 4, min_gain: 37, max_gain: 58, gain_unit: EUR }
+                  - { nom: Réfrigérateur, color: "#01d7fe", flutter_color: "#E0E3E4", done: 0, total: 6, category_id: 1, min_gain: 33, max_gain: 60, gain_unit: EUR }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /gateway/{gatewayId}/missions/cat/{categoryId}:
+    get:
+      tags: [Gamification]
+      summary: Obtenir les missions d'une catégorie
+      operationId: getMissionsByCategory
+      description: Les missions individuelles (conseils) appartenant à un `category_id` de mission.
+      parameters:
+        - { $ref: "#/components/parameters/GatewayId" }
+        - name: categoryId
+          in: path
+          required: true
+          description: Identifiant de catégorie de mission (voir `GET /gateway/{gatewayId}/missions`).
+          schema: { type: integer }
+          example: 1
+      responses:
+        "200":
+          description: Missions de la catégorie.
+          content:
+            application/json:
+              example:
+                category:
+                  nom: Réfrigérateur
+                  color: "#01d7fe"
+                  flutter_color: "#E0E3E4"
+                  image_link: https://service.ecojoko.com/img/placeholder.webp
+                missions:
+                  - title: Réfrigérateur
+                    repeat_code: 1
+                    category: 1
+                    todo: "Adoptez les bons réglages de température : entre +4 et +5 °C pour le réfrigérateur, -18 °C pour le congélateur."
+                    detail: "Le réfrigérateur maintient les aliments à une température définie…"
+                    type: 6
+                    mission_id: 6
+                    is_add: 0
+                    repeat_desc: A faire en 1 fois
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /gateway/{gatewayId}/ranking/down/me/{a}/{b}:
+    get:
+      tags: [Gamification]
+      summary: Obtenir le classement de voisinage (en dessous de moi)
+      operationId: getRankingDown
+      description: |
+        Classement anonymisé des foyers proches, ordonné par émissions de CO₂ et centré sur
+        l'utilisateur courant (`logged: 1`). `{a}` et `{b}` sont des décalages de pagination
+        (l'application utilise `0/0`). Les noms de foyers montrés ici sont des valeurs
+        anonymisées.
+      parameters:
+        - { $ref: "#/components/parameters/GatewayId" }
+        - name: a
+          in: path
+          required: true
+          description: Décalage de pagination A (l'application utilise `0`).
+          schema: { type: integer }
+          example: 0
+        - name: b
+          in: path
+          required: true
+          description: Décalage de pagination B (l'application utilise `0`).
+          schema: { type: integer }
+          example: 0
+      responses:
+        "200":
+          description: Fenêtre de classement.
+          content:
+            application/json:
+              example:
+                error_id: 0
+                error_desc: ""
+                ranking:
+                  - name: House A
+                    issue: 49.8
+                    rank: 100
+                    extra_info: "Chauffage, Panneaux solaires"
+                    appliances: { electric_heater: 1, electric_boiler: 0, solar_panels: 1 }
+                    logged: 0
+                    color: "#ffeca8"
+                  - name: My Home
+                    issue: 50.0
+                    rank: 101
+                    extra_info: "Eau chaude, Panneaux solaires"
+                    appliances: { electric_heater: 0, electric_boiler: 1, solar_panels: 1 }
+                    logged: 1
+                    color: "#5ed7c0"
+                    price: 15.0
+                    evol_status: 2
+                  - name: House B
+                    issue: 50.2
+                    rank: 102
+                    extra_info: "Chauffage, Eau chaude"
+                    appliances: { electric_heater: 1, electric_boiler: 1, solar_panels: 0 }
+                    logged: 0
+                    color: "#ffdacd"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /gateway/{gatewayId}/messages/{offset}:
+    get:
+      tags: [Messages & Notifications]
+      summary: Lister les messages in-app
+      operationId: getMessages
+      description: |
+        Fil paginé des messages in-app (alertes d'économies, records, conseils de
+        température, …). `{offset}` est le curseur de pagination (`0` pour la première page) ;
+        `is_next` indique s'il existe d'autres pages. Le `message_id` de chaque élément sert à
+        le marquer comme lu via `PUT /gateway/{gatewayId}/message/{messageId}`.
+      parameters:
+        - { $ref: "#/components/parameters/GatewayId" }
+        - name: offset
+          in: path
+          required: true
+          description: Décalage de pagination (`0` = première page).
+          schema: { type: integer }
+          example: 0
+      responses:
+        "200":
+          description: Page du fil de messages.
+          content:
+            application/json:
+              example:
+                is_next: 1
+                messages:
+                  - display: savings-detail
+                    category: 2
+                    happiness: 5
+                    title: Vous économisez
+                    desc: Consommation sur 7 jours en baisse de 10% par rapport à votre référence.
+                    id: 18
+                    category_detail_id: 106
+                    date: "2026-01-01 00:00:00"
+                    category_detail:
+                      label: Sur les 7 derniers jours
+                      image_link: https://service.ecojoko.com/img/placeholder.webp
+                    read: 0
+                    message_id: 11111111
+                  - display: records
+                    category: 1
+                    happiness: 5
+                    title: Nouveau niveau
+                    desc: Niveau 1 banane de bronze atteint. Vous consommez moins d’énergie. Merci :o)
+                    id: 9
+                    category_detail_id: 102
+                    date: "2026-01-02 00:00:00"
+                    type: niv1
+                    notification: { img: ecusson_niv1 }
+                    category_detail:
+                      label: Économies
+                      image_link: https://service.ecojoko.com/img/placeholder.webp
+                    read: 0
+                    message_id: 11111112
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /gateway/{gatewayId}/message/{messageId}:
+    put:
+      tags: [Messages & Notifications]
+      summary: Marquer un message comme lu
+      operationId: markMessageRead
+      description: Met à jour l'état « lu » d'un message. Envoyé comme petit corps form/JSON.
+      parameters:
+        - { $ref: "#/components/parameters/GatewayId" }
+        - name: messageId
+          in: path
+          required: true
+          description: Le `message_id` du message à mettre à jour.
+          schema: { type: integer }
+          example: 11111111
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                is_read:
+                  type: integer
+                  description: "`1` pour marquer comme lu, `0` pour non lu."
+            example: { is_read: 1 }
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                is_read: { type: integer }
+      responses:
+        "200":
+          description: Résultat de la mise à jour.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+              example: { error_id: 0, error_desc: "" }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /gateway/{gatewayId}/notifications_center:
+    get:
+      tags: [Messages & Notifications]
+      summary: Obtenir les préférences de notification
+      operationId: getNotificationsCenter
+      description: Catégories de notifications et interrupteurs par notification (`value` = activée).
+      parameters: [{ $ref: "#/components/parameters/GatewayId" }]
+      responses:
+        "200":
+          description: Préférences de notification.
+          content:
+            application/json:
+              example:
+                preferences:
+                  - category_id: 1
+                    category_name: Sur les 7 derniers jours
+                    value: 1
+                    notifications:
+                      - { id: 16, title: "Hausse de plus de 15% de votre consommation par rapport à votre référence", value: 1 }
+                      - { id: 18, title: "Baisse de plus de 15% de votre consommation par rapport à votre référence", value: 0 }
+                  - category_id: 6
+                    category_name: Réglage du chauffage / aération
+                    value: 0
+                    notifications:
+                      - { id: 24, title: "Chauffage supérieur à 22°C", value: 1 }
+                      - { id: 90, title: "Fortes chaleurs: quand ouvrir les fenêtres", value: 0 }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: LKSA
+      description: |
+        Cookie de session obtenu via `POST /login`. La session réelle repose aussi sur le
+        cookie compagnon `tdw` déposé au même moment — renvoyez **les deux** cookies à chaque
+        requête.
+
+  parameters:
+    GatewayId:
+      name: gatewayId
+      in: path
+      required: true
+      description: L'identifiant de la passerelle (voir `GET /gateways`).
+      schema: { type: integer }
+      example: 12345
+    DeviceId:
+      name: deviceId
+      in: path
+      required: true
+      description: L'identifiant d'un appareil associé à la passerelle (voir `GET /gateways`).
+      schema: { type: integer }
+      example: 67891
+    StatDate:
+      name: date
+      in: path
+      required: true
+      description: |
+        Date d'ancrage de la période demandée, `AAAA-MM-JJ`. Dans certaines captures, une
+        heure est ajoutée sans séparateur, c.-à-d. `AAAA-MM-JJHH:MM` (p. ex. `2026-07-0113:25`).
+      schema: { type: string }
+      example: "2026-07-02"
+
+  schemas:
+    ErrorEnvelope:
+      type: object
+      description: Enveloppe de résultat commune renvoyée par les points d'accès d'écriture/action.
+      properties:
+        error_id:
+          type: integer
+          description: "`0` en cas de succès ; non nul en cas d'erreur."
+        error_desc:
+          type: string
+          description: Message lisible (souvent localisé en français).
+
+  responses:
+    Unauthorized:
+      description: |
+        Session absente ou expirée. Rappelez `POST /login` pour obtenir de nouveaux cookies
+        `LKSA` / `tdw`. (Forme observée depuis l'application ; le statut/corps exact peut
+        varier.)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+          example: { error_id: 1, error_desc: "Not connected." }
