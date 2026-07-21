@@ -2,6 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
+    <meta name="google-site-verification" content="mYm9nk303sBJwvb9gpC4X_fB5vt0B0yUzd0UhF5ISKQ" />
     <title>Ecojoko API — Unofficial Documentation</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta
@@ -33,6 +34,55 @@
         #lang-switch a { color: #9ca3af; }
         #lang-switch .active { color: #ffffff; }
       }
+
+      /* Cookie consent — pinned to the bottom of the viewport until dismissed. */
+      #cookie-consent {
+        position: fixed;
+        left: 16px; right: 16px; bottom: 16px;
+        z-index: 2147483647;
+        max-width: 720px;
+        margin: 0 auto;
+        display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+        font: 400 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: rgba(255, 255, 255, 0.96);
+        color: #1a1a1a;
+        border: 1px solid rgba(0, 0, 0, 0.12);
+        border-radius: 14px;
+        padding: 16px 20px;
+        box-shadow: 0 4px 24px rgba(0, 0, 0, 0.18);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+      }
+      #cookie-consent[hidden] { display: none; }
+      .cc-copy { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1 1 280px; }
+      .cc-title { font-size: 14px; font-weight: 700; }
+      .cc-sub { font-size: 13px; color: #6b7280; line-height: 1.4; }
+      .cc-actions { display: flex; gap: 8px; flex-shrink: 0; margin-left: auto; }
+      .cc-btn {
+        font: 600 13px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        cursor: pointer;
+        border-radius: 999px;
+        padding: 9px 16px;
+        border: 1px solid rgba(0, 0, 0, 0.14);
+        background: transparent;
+        color: #1a1a1a;
+      }
+      .cc-btn:hover { background: rgba(0, 0, 0, 0.05); }
+      .cc-btn.primary {
+        background: #6b46c1;
+        border-color: #6b46c1;
+        color: #ffffff;
+      }
+      .cc-btn.primary:hover { background: #5a37a8; }
+      @media (prefers-color-scheme: dark) {
+        #cookie-consent { background: rgba(30, 30, 34, 0.96); color: #f5f5f5; border-color: rgba(255, 255, 255, 0.14); }
+        .cc-sub { color: #9ca3af; }
+        .cc-btn { color: #f5f5f5; border-color: rgba(255, 255, 255, 0.18); }
+        .cc-btn:hover { background: rgba(255, 255, 255, 0.08); }
+        .cc-btn.primary { background: #8b6fd6; border-color: #8b6fd6; color: #1a1a1a; }
+        .cc-btn.primary:hover { background: #9d84e0; }
+      }
+      @media print { #cookie-consent { display: none; } }
     </style>
   </head>
   <body>
@@ -48,5 +98,71 @@
       data-configuration='{"theme":"purple","layout":"modern","hideDownloadButton":false}'
     ></script>
     <script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script>
+
+    <!-- Cookie consent banner. Hidden until a choice is needed. -->
+    <div id="cookie-consent" role="dialog" aria-live="polite" aria-label="Analytics cookies" hidden>
+      <div class="cc-copy">
+        <span class="cc-title">🍪 Analytics cookies</span>
+        <span class="cc-sub">We use Google Analytics to understand how the site is used, only with your consent. No analytics cookies are set if you decline.</span>
+      </div>
+      <div class="cc-actions">
+        <button type="button" id="cc-decline" class="cc-btn">Decline</button>
+        <button type="button" id="cc-accept" class="cc-btn primary">Accept</button>
+      </div>
+    </div>
+
+    <!--
+      Google Analytics (GA4), consent-gated.
+      GA loads only after the visitor accepts; the choice is persisted in
+      localStorage so the banner appears once. Nothing is tracked on decline.
+    -->
+    <script>
+      (function () {
+        var GA_ID = 'G-B1PYKGFC1Y'; // GA4 measurement ID.
+        var STORAGE_KEY = 'ecojoko-api.consent';
+
+        function loadGA() {
+          if (!GA_ID || GA_ID.indexOf('G-') !== 0 || GA_ID === 'G-XXXXXXXXXX' || window.gtag) return;
+          var s = document.createElement('script');
+          s.async = true;
+          s.src = 'https://www.googletagmanager.com/gtag/js?id=' + GA_ID;
+          document.head.appendChild(s);
+          window.dataLayer = window.dataLayer || [];
+          window.gtag = function () { window.dataLayer.push(arguments); };
+          window.gtag('js', new Date());
+          window.gtag('config', GA_ID);
+        }
+
+        function getConsent() {
+          try { return localStorage.getItem(STORAGE_KEY); } catch (e) { return null; }
+        }
+        function setConsent(v) {
+          try { localStorage.setItem(STORAGE_KEY, v); } catch (e) {}
+        }
+
+        if (getConsent() === 'granted') loadGA();
+
+        function ready(fn) {
+          if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', fn);
+          else fn();
+        }
+
+        ready(function () {
+          var banner = document.getElementById('cookie-consent');
+          if (!banner) return;
+          if (!getConsent()) banner.hidden = false;
+
+          document.getElementById('cc-accept').addEventListener('click', function () {
+            setConsent('granted');
+            loadGA();
+            banner.hidden = true;
+          });
+          document.getElementById('cc-decline').addEventListener('click', function () {
+            setConsent('denied');
+            banner.hidden = true;
+          });
+        });
+      })();
+    </script>
   </body>
 </html>

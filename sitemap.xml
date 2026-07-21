@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:xhtml="http://www.w3.org/1999/xhtml">
+  <!-- French documentation (default homepage). -->
+  <url>
+    <loc>https://ecojokoapi.github.io/ecojoko-api-docs/</loc>
+    <lastmod>2026-07-21</lastmod>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://ecojokoapi.github.io/ecojoko-api-docs/" />
+    <xhtml:link rel="alternate" hreflang="en" href="https://ecojokoapi.github.io/ecojoko-api-docs/en.html" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://ecojokoapi.github.io/ecojoko-api-docs/" />
+  </url>
+  <!-- English documentation. -->
+  <url>
+    <loc>https://ecojokoapi.github.io/ecojoko-api-docs/en.html</loc>
+    <lastmod>2026-07-21</lastmod>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://ecojokoapi.github.io/ecojoko-api-docs/" />
+    <xhtml:link rel="alternate" hreflang="en" href="https://ecojokoapi.github.io/ecojoko-api-docs/en.html" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://ecojokoapi.github.io/ecojoko-api-docs/" />
+  </url>
+</urlset>
